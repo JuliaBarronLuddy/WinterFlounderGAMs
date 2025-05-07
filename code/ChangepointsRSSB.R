@@ -99,7 +99,7 @@ colnames(age1df)<-c('year',
 head(age1df)
 age1names<-colnames(age1df[2:7])
 #run function
-envcpt_fun(age1df,age1names,foldertype="recruitment",yax="Abundance",ylabel="Recruitment",datatype="COG Data")
+envcpt_fun(age1df,age1names,foldertype="recruitment",yax="Abundance",ylabel="Recruitment",datatype="Recruitment Data")
 R_Envyears<-as.data.frame(cpyear)
 
 
@@ -109,7 +109,7 @@ trackyear<-data.frame(matrix(ncol = 1, nrow = 0))
 colnames(trackyear) <- c('cpyear')
 changepoint_fun<- function(data,dfnames,foldertype,yax,ylabel,datatype){
   for (k in 2:length(data)){
-    fit_cpt = changepoint::cpt.mean(na.omit(data[c(1:46),k]),method = "PELT",penalty="AIC",minseglen = 5)  # Fit mean model
+    fit_cpt = changepoint::cpt.mean(na.omit(data[c(1:46),k]),method = "AMOC",penalty="AIC",minseglen = 5)  # Fit mean model
     ints = param.est(fit_cpt)$mean #get mean cpt values
     cp = cpts(fit_cpt) #get changepoint year numbers
     cpyear<-na.omit(as.data.frame(data[c(1,k)]))[cp,1] #get changepoint year
@@ -295,8 +295,52 @@ envcpt_fun <- function(data, dfnames, foldertype, yax, ylabel, datatype) {
   list2env(trackyear, envir = .GlobalEnv)
 }
 
-
-
+####Changepoint Function for Changepoint package####
+trackyear<-data.frame(matrix(ncol = 1, nrow = 0))
+colnames(trackyear) <- c('cpyear')
+changepoint_fun<- function(data,dfnames,foldertype,yax,ylabel,datatype){
+  for (k in 2:length(data)){
+    fit_cpt = changepoint::cpt.mean(na.omit(data[c(1:46),k]),method = "AMOC",penalty="AIC",minseglen = 5)  # Fit mean model
+    ints = param.est(fit_cpt)$mean #get mean cpt values
+    cp = cpts(fit_cpt) #get changepoint year numbers
+    cpyear<-na.omit(as.data.frame(data[c(1,k)]))[cp,1] #get changepoint year
+    trackyear2<-as.data.frame(cpyear)
+    trackyear<- rbind(trackyear,trackyear2)
+    
+    startyear<-dplyr::first(na.omit(data[data[,k]==(dplyr::first(na.omit(data[c(1:46),k]))),1])) #get first non NA year of data for every column
+    finalyear<-dplyr::last(na.omit(data[data[,k]==(dplyr::last(na.omit(data[c(1:46),k]))),1])) #get final year of data for every column
+    #make plot
+    png(here(paste0("Figures/Raw_data_trends/Changepoint/",foldertype,"/changepoint/",dfnames[k-1],".png")),width = 449, height = 374.5, units = "px",res=90)
+    par(mar=c(4,4.5,2,0.5))
+    plot(data[,1],data[,k],main=paste0(c(dfnames[k-1],yax),collapse=" "),ylab=ylabel, xlab="Year",type="l",lwd=3,col="#00608A",cex.lab=1.5,cex.axis=1.2,xaxt='n')
+    
+    abline(v=c(cpyear[1],cpyear[2],cpyear[3]),col="red",lwd=3,lty=2)
+    if (length(cp)==0){abline(h=ints[1],col="red",lwd=1,lty=1)}else{
+      if (length(cp)==1){ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=cpyear[1])
+        ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=cpyear[1],x2=finalyear)}else{
+          if (length(cp)==2){ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=cpyear[1])
+            ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=cpyear[1],x2=cpyear[2])
+            ablineclip(h=ints[3],col="red",lwd=1,lty=1,x1=cpyear[2],x2=finalyear)}else{
+              if (length(cp)>=3){ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=cpyear[1])
+                ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=cpyear[1],x2=cpyear[2])
+                ablineclip(h=ints[3],col="red",lwd=1,lty=1,x1=cpyear[2],x2=cpyear[3])
+                ablineclip(h=ints[4],col="red",lwd=1,lty=1,x1=cpyear[3],x2=finalyear)}
+              
+            }}}
+    
+    axis(side=1,at=c(startyear,cpyear,finalyear),labels=c(startyear,cpyear,finalyear))
+    #    abline(v=cpyear,col="red",lwd=3,lty=2)
+    #    ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=if(length(cp)==0){finalyear}else{cpyear})
+    #    ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=if(length(cp)==0){startyear-1}else{cpyear},x2=finalyear)
+    legend("topright",inset=c(0.03,0.03), legend=c(datatype, "Segmented Mean","Changepoint"), col=c("#00608A", "red", "red"), lty=c(1,1,2),lwd=c(3,1,3), cex=1.0)
+    dev.off()
+  }
+  list2env(trackyear, envir = .GlobalEnv)
+}
+#####################change point analysis for r/ssb data for winter flounder#######################
+#### Call function for age1 data####
+changepoint_fun(age1df[-c(8:9)],age1names,foldertype="recruitment",yax="Abundance",ylabel="Recruitment",datatype="Recruitment Data")
+envcpt_fun(rssbdf, rssbnames, foldertype="recruitment", yax="", ylabel="Winter Flounder R/SSB", datatype="Recruitment Data")
 
 
 
