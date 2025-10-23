@@ -4,8 +4,8 @@ library(here)
 library(tidyverse)
 library(mgcv)
 ################################################################################
+########################## GULF OF MAINE #######################################
 ##Data Exploration
-
 #Data load
 gom_age <- read.csv(here("data/gom_age.csv"))
 gom_age1 <- gom_age[which(gom_age$AGE=='1'),]
@@ -181,6 +181,71 @@ plot.gam(gam1,xlab="BT Anomalies",ylab="Partial Effect of BT Anomalies on Age 1 
 #rug(gam1$BTAnom, ticksize=0.1, side=1, lwd=1.75,col="Black")
 plot.gam(gam1,xlab="SST Anomalies",ylab="Partial Effect of SST Anomalies on Age 1 Recruitment", select=2, cex.lab=1.5,cex.axis=1.4,rug=TRUE,shade = TRUE,col = "Black",shade.col="#E9E9E9",lwd = 2)
 plot.gam(gam1,xlab="GSI",ylab="Partial Effect of GSI on Age 1 Recruitment", select=3, cex.lab=1.5,cex.axis=1.4,rug=TRUE,shade = TRUE,col = "Black",shade.col="#E9E9E9",lwd = 2)
+
+
+######################### GEORGES BANK #################################
+#additional ecosystem driver: warm core ring
+#Warm Core Ring census
+warmcore <- read.csv(here("data/wcr_census.csv"))
+
+
+
+
+
+
+
+
+#load data
+gbk_age <- read.csv(here("data/gbk_age.csv"))
+gbk_age1 <- gbk_age[which(gbk_age$AGE=='1'),]
+gbk_spring_age1 <- gbk_age1[which(gbk_age1$SURVEY=='NMFS spring BTS'),]
+gbk_fall_age1 <- gbk_age1[which(gbk_age1$SURVEY=='NMFS fall BTS'),]
+gbk_spring_age1 <- gbk_spring_age1 %>% select(c('YEAR', 'NO_AT_AGE'))
+gbk_fall_age1 <- gbk_fall_age1 %>% select(c('YEAR', 'NO_AT_AGE'))
+names(gbk_spring_age1)[names(gbk_spring_age1) == 'YEAR'] <- 'Year'
+names(gbk_fall_age1)[names(gbk_fall_age1) == 'YEAR'] <- 'Year'
+
+gamgbkage1springdata <- gbk_spring_age1 %>%
+  full_join(ecovars, by = "Year")
+
+gamgbkage1falldata <- gbk_fall_age1 %>%
+  full_join(ecovars, by = "Year")
+
+gamgbkage1springdata <- gamgbkage1springdata[order(gamgbkage1springdata$Year),]
+gamgbkage1falldata <- gamgbkage1falldata[order(gamgbkage1falldata$Year),]
+
+
+gamgbkage1spring <- gam(NO_AT_AGE~s(BTAnom, k=5)+s(SSTAnom, k=5), family=tw(), method="REML", data=gamgbkage1springdata)
+#REML: Restricted maximum likelihood approach to smoothing
+summary(gamgbkage1spring)
+gam.check(gamgbkage1spring)
+concurvity(gamgbkage1spring)
+AIC(gamgbkage1spring) #-46 gamma, -43 tw
+
+plot.gam(gamgbkage1spring,xlab="BT Anomalies",ylab="Partial Effect of BT Anomalies on Age 1 Recruitment", select=1, cex.lab=1.5,cex.axis=1.4,rug=TRUE,shade = TRUE,col = "Black",shade.col="#E9E9E9",lwd = 2)
+#rug(gam1$BTAnom, ticksize=0.1, side=1, lwd=1.75,col="Black")
+plot.gam(gamgbkage1spring,xlab="SST Anomalies",ylab="Partial Effect of SST Anomalies on Age 1 Recruitment", select=2, cex.lab=1.5,cex.axis=1.4,rug=TRUE,shade = TRUE,col = "Black",shade.col="#E9E9E9",lwd = 2)
+plot.gam(gamgbkage1spring,xlab="GSI",ylab="Partial Effect of GSI on Age 1 Recruitment", select=3, cex.lab=1.5,cex.axis=1.4,rug=TRUE,shade = TRUE,col = "Black",shade.col="#E9E9E9",lwd = 2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

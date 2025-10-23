@@ -7,6 +7,7 @@ library(png)
 library(grid)
 library(gridExtra)
 library(plotrix) #to make cropped abline
+library(corrplot)
 
 #calling all age datasets for each stock
 gom_age <- read.csv(here("data/gom_age.csv"))
@@ -35,50 +36,6 @@ snema1springMADMF <- snema1spring[which(snema1spring$SEASON=='MADMF spring BTS')
 snema1fallNMFS <- snema1fall[which(snema1fall$SURVEY=='NMFS fall BTS'),]
 snema1fallMADMF <- snema1fall[which(snema1fall$SURVEY=='MADMF fall BTS'),]
 
-
-#### ENVCPT FUNCTION ####
-trackyear<-data.frame(matrix(ncol = 1, nrow = 0))
-colnames(trackyear) <- c('cpyear')
-envcpt_fun<- function(data,dfnames,foldertype,yax,ylabel,datatype){
-  for (k in 2:length(data)){
-    clean_data <- na.omit(data[c(1:46), c(1, k)])  #keep only non-NA rows
-    fit_envcpt = envcpt(na.omit(data[c(1:46),k]),models="meancpt",minseglen=5)  #fit mean model
-    ints = unlist((fit_envcpt$meancpt@param.est[1])) #get mean cpt values
-    cp = fit_envcpt$meancpt@cpts #get changepoint year numbers
-    cp = cp[!cp %in% c(1,nrow(na.omit(data[k])))]
-    cpyear<-na.omit(as.data.frame(data[c(1,k)]))[cp,1] #get changepoint year
-    trackyear2<-as.data.frame(cpyear)
-    trackyear<- rbind(trackyear,trackyear2)
-    
-    #get first & last valid years
-    startyear <- dplyr::first(clean_data[, 1])
-    finalyear <- dplyr::last(clean_data[, 1])
-    
-    #make plot
-    png(here(paste0("figures/Raw_data_trends/Changepoint/",foldertype,"/EnvCPT/",dfnames[k-1],".png")),width = 449, height = 374.5, units = "px",res=90)
-    par(mar=c(4,4.5,2,0.5))
-    plot(data[,1],data[,k],main=paste0(c(dfnames[k-1],yax),collapse=" "),ylab=ylabel, xlab="Year",type="l",lwd=3,col="#00608A",cex.lab=1.5,cex.axis=1.2,xaxt='n')
-    axis(side=1,at=c(startyear,cpyear[1],cpyear[2],finalyear),labels=c(startyear,cpyear[1],cpyear[2],finalyear))
-    abline(v=c(cpyear[1],cpyear[2],cpyear[3]),col="red",lwd=3,lty=2)
-    if (length(cp)==0){abline(h=ints[1],col="red",lwd=1,lty=1)}else{
-      if (length(cp)==1){ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=cpyear[1])
-        ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=cpyear[1],x2=finalyear)}else{
-          if (length(cp)==2){ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=cpyear[1])
-            ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=cpyear[1],x2=cpyear[2])
-            ablineclip(h=ints[3],col="red",lwd=1,lty=1,x1=cpyear[2],x2=finalyear)}else{
-              if (length(cp)>=3){ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=cpyear[1])
-                ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=cpyear[1],x2=cpyear[2])
-                ablineclip(h=ints[3],col="red",lwd=1,lty=1,x1=cpyear[2],x2=cpyear[3])
-                ablineclip(h=ints[4],col="red",lwd=1,lty=1,x1=cpyear[3],x2=finalyear)}
-              
-            }}}
-    legend("topright",inset=c(0.03,0.03), legend=c(datatype, "Segmented Mean","Changepoint"), col=c("#00608A", "red", "red"), lty=c(1,1,2),lwd=c(3,1,3), cex=1.0)
-    dev.off()
-  }
-  list2env(trackyear, envir = .GlobalEnv)
-}
-
-####### call function for Age 1 recruitment (NMFS survey) ########
 #extract data for each year and create individual data frames
 gom_fall <- data.frame(year = gom1fallNMFS[1:42, 7], gom_fall_age1_nmfs = gom1fallNMFS[1:42, 9])
 gom_spring <- data.frame(year = gom1springNMFS[1:43, 7], gom_spring_age1_nmfs = gom1springNMFS[1:43, 9])
@@ -98,65 +55,111 @@ colnames(age1df)<-c('year',
                     'snema_fall_age1_nmfs','snema_spring_age1_nmfs')
 head(age1df)
 age1names<-colnames(age1df[2:7])
+
+#######ORIGINAL Function that drops changepoint if it exceeds .5 sd from both segment means#####
+trackyear <- data.frame(matrix(ncol = 1, nrow = 0))
+colnames(trackyear) <- c('cpyear')
+
+envcpt_fun <- function(data, dfnames, foldertype, yax, ylabel, datatype) {
+  for (k in 2:length(data)) { #loop through each column (variable) in the data
+    clean_data <- na.omit(data[1:46, c(1, k)])  # keep only non-NA rows, isolate time series
+    data_column <- na.omit(data[1:46, k])
+    threshold <- max(0.25 * sd(data_column, na.rm = TRUE), 0.2) #set threshold for valid mean shifts -> adapts to the natural variability in the data (0.25 × SD). Ensures the threshold doesn't get too small with low-variance series (minimum of 0.2)
+    fit_envcpt <- envcpt(data_column, models = "meancpt", minseglen = 5,
+                         penalty = "Manual", pen.value = 4 * log(length(data_column))) #detecting changepoints in mean only while applying manual penalty to control sensitivity and (4*log(n)) to reduce overfitting 
+    ints <- unlist(fit_envcpt$meancpt@param.est[[1]])
+    cp <- fit_envcpt$meancpt@cpts
+    cp <- cp[!cp %in% c(1, length(data_column))]  # remove changepoints at endpoints
+    
+    # Remove changepoints caused by singular extreme datapoints
+    if (length(cp) > 0) {
+      new_cp <- c()
+      for (i in seq_along(cp)) {
+        idx <- cp[i]
+        window <- data_column[(idx - 1):(idx + 1)]
+        if (length(window) < 3) next
+        pre_mean <- mean(data_column[1:idx], na.rm = TRUE)
+        post_mean <- mean(data_column[(idx + 1):length(data_column)], na.rm = TRUE)
+        sd_val <- sd(data_column, na.rm = TRUE)
+        outlier_count <- sum(abs(window - pre_mean) > 0.5 * sd_val & abs(window - post_mean) > 0.5 * sd_val, na.rm = TRUE)
+        if (outlier_count <= 1) next  # skip this changepoint
+        new_cp <- c(new_cp, idx)
+      } # chunk above is to filter out changepoints caused by singular extreme values that can be false positives. I define a small 3-point window around the changepoint and keep it if at least two of those points differ significantly (>0.5xSD) from both pre- and post-mean
+      cp <- new_cp
+      if (length(cp) == 0) {
+        ints <- ints[1]
+      } else {
+        ints <- unlist(fit_envcpt$meancpt@param.est[[1]])[c(1, which(cp %in% fit_envcpt$meancpt@cpts) + 1)]
+      } #chunk above recalculates segment means if changepoints were removed due to above filtering
+    }
+    
+    # Filter changepoints by mean difference threshold
+    if (length(ints) > 1) {
+      mean_diffs <- abs(diff(ints))
+      keep_idx <- which(mean_diffs >= threshold) #filter changepoints by meaningful segemnt different that lead to a real shift in mean, this filters out noise and tiny shifts 
+      if (length(keep_idx) > 0) {
+        cp <- cp[keep_idx]
+        ints <- ints[c(1, keep_idx + 1)]
+      } else {
+        cp <- numeric(0)
+        ints <- ints[1]
+      }
+    }
+    
+    cpyear <- na.omit(as.data.frame(data[1:46, c(1, k)]))[cp, 1] #Extract changepoint years
+    trackyear2 <- as.data.frame(cpyear)
+    trackyear <- rbind(trackyear, trackyear2)
+    
+    # Get first & last valid years
+    startyear <- dplyr::first(clean_data[, 1])
+    finalyear <- dplyr::last(clean_data[, 1])
+    
+    # Make plot
+    png(here(paste0("figures/Raw_data_trends/Changepoint/", foldertype, "/EnvCPT/", dfnames[k - 1], ".png")),
+        width = 449, height = 374.5, units = "px", res = 90)
+    par(mar = c(4, 4.5, 2, 0.5))
+    plot(data[, 1], data[, k], main = paste0(c(dfnames[k - 1], yax), collapse = " "),
+         ylab = ylabel, xlab = "Year", type = "l", lwd = 3, col = "#00608A",
+         cex.lab = 1.5, cex.axis = 1.2, xaxt = 'n')
+    
+    axis_labels <- unique(na.omit(c(startyear, cpyear, finalyear)))
+    axis(side = 1, at = axis_labels, labels = axis_labels)
+    
+    if (length(cpyear) > 0) abline(v = cpyear, col = "red", lwd = 3, lty = 2)
+    
+    # Segmented means
+    if (length(cp) == 0) {
+      abline(h = ints[1], col = "red", lwd = 1, lty = 1)
+    } else if (length(cp) == 1) {
+      ablineclip(h = ints[1], col = "red", lwd = 1, lty = 1, x1 = startyear - 1, x2 = cpyear[1])
+      ablineclip(h = ints[2], col = "red", lwd = 1, lty = 1, x1 = cpyear[1], x2 = finalyear)
+    } else if (length(cp) == 2) {
+      ablineclip(h = ints[1], col = "red", lwd = 1, lty = 1, x1 = startyear - 1, x2 = cpyear[1])
+      ablineclip(h = ints[2], col = "red", lwd = 1, lty = 1, x1 = cpyear[1], x2 = cpyear[2])
+      ablineclip(h = ints[3], col = "red", lwd = 1, lty = 1, x1 = cpyear[2], x2 = finalyear)
+    } else if (length(cp) >= 3) {
+      ablineclip(h = ints[1], col = "red", lwd = 1, lty = 1, x1 = startyear - 1, x2 = cpyear[1])
+      ablineclip(h = ints[2], col = "red", lwd = 1, lty = 1, x1 = cpyear[1], x2 = cpyear[2])
+      ablineclip(h = ints[3], col = "red", lwd = 1, lty = 1, x1 = cpyear[2], x2 = cpyear[3])
+      ablineclip(h = ints[4], col = "red", lwd = 1, lty = 1, x1 = cpyear[3], x2 = finalyear)
+    }
+    
+    legend("topright", inset = c(0.03, 0.03),
+           legend = c(datatype, "Segmented Mean", "Changepoint"),
+           col = c("#00608A", "red", "red"),
+           lty = c(1, 1, 2), lwd = c(3, 1, 3), cex = 1.0)
+    dev.off()
+  }
+  list2env(trackyear, envir = .GlobalEnv) #store changepoint years to global environment
+}
+
 #run function
 envcpt_fun(age1df,age1names,foldertype="recruitment",yax="Abundance",ylabel="Recruitment",datatype="Recruitment Data")
 R_Envyears<-as.data.frame(cpyear)
 
 
-##### Changepoint package #####
-####Changepoint Function for Changepoint package####
-trackyear<-data.frame(matrix(ncol = 1, nrow = 0))
-colnames(trackyear) <- c('cpyear')
-changepoint_fun<- function(data,dfnames,foldertype,yax,ylabel,datatype){
-  for (k in 2:length(data)){
-    fit_cpt = changepoint::cpt.mean(na.omit(data[c(1:46),k]),method = "AMOC",penalty="AIC",minseglen = 5)  # Fit mean model
-    ints = param.est(fit_cpt)$mean #get mean cpt values
-    cp = cpts(fit_cpt) #get changepoint year numbers
-    cpyear<-na.omit(as.data.frame(data[c(1,k)]))[cp,1] #get changepoint year
-    trackyear2<-as.data.frame(cpyear)
-    trackyear<- rbind(trackyear,trackyear2)
-    
-    startyear<-dplyr::first(na.omit(data[data[,k]==(dplyr::first(na.omit(data[c(1:46),k]))),1])) #get first non NA year of data for every column
-    finalyear<-dplyr::last(na.omit(data[data[,k]==(dplyr::last(na.omit(data[c(1:46),k]))),1])) #get final year of data for every column
-    #make plot
-    png(here(paste0("Figures/Raw_data_trends/Changepoint/",foldertype,"/changepoint/",dfnames[k-1],".png")),width = 449, height = 374.5, units = "px",res=90)
-    par(mar=c(4,4.5,2,0.5))
-    plot(data[,1],data[,k],main=paste0(c(dfnames[k-1],yax),collapse=" "),ylab=ylabel, xlab="Year",type="l",lwd=3,col="#00608A",cex.lab=1.5,cex.axis=1.2,xaxt='n')
-    
-    abline(v=c(cpyear[1],cpyear[2],cpyear[3]),col="red",lwd=3,lty=2)
-    if (length(cp)==0){abline(h=ints[1],col="red",lwd=1,lty=1)}else{
-      if (length(cp)==1){ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=cpyear[1])
-        ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=cpyear[1],x2=finalyear)}else{
-          if (length(cp)==2){ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=cpyear[1])
-            ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=cpyear[1],x2=cpyear[2])
-            ablineclip(h=ints[3],col="red",lwd=1,lty=1,x1=cpyear[2],x2=finalyear)}else{
-              if (length(cp)>=3){ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=cpyear[1])
-                ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=cpyear[1],x2=cpyear[2])
-                ablineclip(h=ints[3],col="red",lwd=1,lty=1,x1=cpyear[2],x2=cpyear[3])
-                ablineclip(h=ints[4],col="red",lwd=1,lty=1,x1=cpyear[3],x2=finalyear)}
-              
-            }}}
-    
-    axis(side=1,at=c(startyear,cpyear,finalyear),labels=c(startyear,cpyear,finalyear))
-    #    abline(v=cpyear,col="red",lwd=3,lty=2)
-    #    ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=if(length(cp)==0){finalyear}else{cpyear})
-    #    ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=if(length(cp)==0){startyear-1}else{cpyear},x2=finalyear)
-    legend("topright",inset=c(0.03,0.03), legend=c(datatype, "Segmented Mean","Changepoint"), col=c("#00608A", "red", "red"), lty=c(1,1,2),lwd=c(3,1,3), cex=1.0)
-    dev.off()
-  }
-  list2env(trackyear, envir = .GlobalEnv)
-}
-#####################change point analysis for Age 1 recruitment data for winter flounder####
-nm <- list.files(path =here("data/Final_Data_for_Modelers/Recruitment"), pattern = ".csv", full.names = TRUE)
-nm2 <- list.files(path =here("data/Final_Data_for_Modelers/Recruitment"), pattern = ".csv", full.names =FALSE)
-list2env(lapply(setNames(nm, make.names(gsub("*.csv$", "",nm2))),read.csv),envir=.GlobalEnv)
-rm(nm,nm2)
-#### Call function for age1 data####
-changepoint_fun(age1df[-c(8:9)],age1names,foldertype="recruitment",yax="Abundance",ylabel="Recruitment",datatype="Recruitment Data")
-R_cpyears<-as.data.frame(cpyear)
 
-
-###########R/SSB Calculations for SNE/MA##############
+###########R/SSB Calculations for SNE/MA#######################################
 #Merge recruitment dataset with ssb dataset 
 
 #Check heads
@@ -166,7 +169,7 @@ print(head(age1df))
 #change name of year column to match
 names(ssb_snema)[names(ssb_snema) == 'YEAR'] <- 'year'
 
-#select only the columns I want out of the recrutiment df 
+#select only the columns I want out of the recruitment df 
 age1snema <- age1df %>%
   dplyr::select(year, snema_fall_age1_nmfs, snema_spring_age1_nmfs)
 
@@ -174,8 +177,8 @@ age1snema <- age1df %>%
 recruitment_snema <- merge(ssb_snema, age1snema, by = "year")
 
 #create R/SSB!
-recruitment_snema$rssb_spring<-recruitment_snema$snema_fall_age1_nmfs/lag(recruitment_snema[,"SSB"])
-recruitment_snema$rssb_fall<-recruitment_snema$snema_spring_age1_nmfs/lag(recruitment_snema[,"SSB"])
+recruitment_snema$rssb_fall<-recruitment_snema$snema_fall_age1_nmfs/lag(recruitment_snema[,"SSB"])
+recruitment_snema$rssb_spring<-recruitment_snema$snema_spring_age1_nmfs/lag(recruitment_snema[,"SSB"])
 
 ###########R/SSB Calculations for GBK##############
 #Merge recruitment dataset with ssb dataset 
@@ -195,39 +198,52 @@ age1gbk <- age1df %>%
 recruitment_gbk <- merge(ssb_gbk, age1gbk, by = "year")
 
 #create R/SSB!
-recruitment_gbk$rssb_spring<-recruitment_gbk$gbk_fall_age1_nmfs/lag(recruitment_gbk[,"SSB"])
-recruitment_gbk$rssb_fall<-recruitment_gbk$gbk_spring_age1_nmfs/lag(recruitment_gbk[,"SSB"])
+recruitment_gbk$rssb_fall<-recruitment_gbk$gbk_fall_age1_nmfs/lag(recruitment_gbk[,"SSB"])
+recruitment_gbk$rssb_spring<-recruitment_gbk$gbk_spring_age1_nmfs/lag(recruitment_gbk[,"SSB"])
+
+###########R/SSB Calculations for GULF OF MAINE#######################################
+#Merge recruitment dataset with ssb dataset 
+
+#Check heads
+print(head(ssb_gom))
+print(head(age1df))
+
+#change name of year column to match
+names(ssb_gom)[names(ssb_gom) == 'YEAR'] <- 'year'
+
+#select only the columns I want out of the recrutiment df 
+age1gom <- age1df %>%
+  dplyr::select(year, gom_fall_age1_nmfs, gom_spring_age1_nmfs)
+
+#merge to create new dataset!
+recruitment_gom <- merge(ssb_gom, age1gom, by = "year")
+
+#create R/SSB!
+recruitment_gom$rssb_fall<-recruitment_gom$gom_fall_age1_nmfs/lag(recruitment_gom[,"SSB"])
+recruitment_gom$rssb_spring<-recruitment_gom$gom_spring_age1_nmfs/lag(recruitment_gom[,"SSB"])
+
+
+
+
+
+
+
 
 #########NOW COMBINE ALL#########
-#make dataframe with everything combined (sans GOM because no WAA table right now)
+#make dataframe with everything combined 
 
 rssbdf<-data.frame(recruitment_snema[c(2:40),1],
                    recruitment_snema[c(2:40),5],recruitment_snema[c(2:40),6],
-                   recruitment_gbk[c(2:40),5],recruitment_gbk[c(2:40),6])
+                   recruitment_gbk[c(2:40),5],recruitment_gbk[c(2:40),6],
+                   recruitment_gom[c(2:40),5], recruitment_gom[c(2:40),6])
 colnames(rssbdf)<-c('Year',
                     'SNEMA_Fall_rssb','SNEMA_Spring_rssb',
-                    'GBK_Fall_rssb','GBK_Spring_rssb')
+                    'GBK_Fall_rssb','GBK_Spring_rssb',
+                    'GOM_Fall_rssb', 'GOM_Spring_rssb')
 
-rssbnames<-colnames(rssbdf[2:4])
-envcpt_fun(rssbdf[-c(8:9)],rssbnames,foldertype="recruitment",yax="",ylabel="Winter Flounder R/SSB",datatype="Recruitment Data")
-RSSB_Envyears<-as.data.frame(cpyear)
-
-########CHATGPT##########
-
-# Create the combined dataset with properly aligned rows
-rssbdf <- data.frame(
-  recruitment_snema[1:40, 1],  
-  recruitment_snema[1:40, 5],  
-  recruitment_snema[1:40, 6],  
-  recruitment_gbk[1:40, 5],  
-  recruitment_gbk[1:40, 6]
-)
-
-# Assign correct column names
-colnames(rssbdf) <- c('Year', 'SNEMA_Fall_rssb', 'SNEMA_Spring_rssb', 'GBK_Fall_rssb', 'GBK_Spring_rssb')
 
 # Ensure correct indexing of column names
-rssbnames <- colnames(rssbdf)[2:5]
+rssbnames <- colnames(rssbdf)[2:7]
 
 # Run the function
 envcpt_fun(rssbdf, rssbnames, foldertype="recruitment", yax="", ylabel="Winter Flounder R/SSB", datatype="Recruitment Data")
@@ -235,112 +251,25 @@ envcpt_fun(rssbdf, rssbnames, foldertype="recruitment", yax="", ylabel="Winter F
 # Store results
 RSSB_Envyears <- as.data.frame(cpyear)
 
+#------------------------------------
+#Density plot RECRUITMENT
+png(here("Figures/Raw_data_trends/Changepoint/recruitment/EnvCPT/Recruitment_density.png"),width =449,height=374.5, units = "px",res=100)
+d <- density(RSSB_Envyears$cpyear,bw=2.8)
+plot(d, main="Recruitment CP Year Trends: Changepoint", xlab="Year",lwd=3,col="#00736D",xlim=c(1977,2023),ylim=c(0,0.18))
+lines(density(R_Envyears$cpyear,bw=2.8),lwd=3,col="#ABB400",xlim=c(1977,2023),ylim=c(0,0.1))
+legend("topleft", c(paste0("Numbers at Age 1 Data   N=",nrow(R_Envyears)),paste0("R/SSB Data   N=",nrow(RSSB_Envyears))), col=c("#ABB400","#00736D"),lty = c(1,1),lwd = c(3,3),cex = 0.8)
 
-#### ENVCPT FUNCTION ####
-trackyear <- data.frame(matrix(ncol = 1, nrow = 0))
-colnames(trackyear) <- c('cpyear')
 
-envcpt_fun <- function(data, dfnames, foldertype, yax, ylabel, datatype) {
-  for (k in 2:ncol(data)) {
-    
-    # Ensure we are not removing key data with na.omit()
-    fit_envcpt <- envcpt(data[c(1:46), k], models="meancpt", minseglen=5)
-    
-    # Extract mean change points
-    ints <- unlist((fit_envcpt$meancpt@param.est[1])) 
-    cp <- fit_envcpt$meancpt@cpts  
-    cp <- cp[!cp %in% c(1, nrow(na.omit(data[k])))]  # Remove first and last row if selected
-    
-    # Ensure cpyear is not empty
-    cpyear <- if (length(cp) > 0) na.omit(as.data.frame(data[c(1, k)]))[cp, 1] else NA
-    trackyear2 <- as.data.frame(cpyear)
-    trackyear <- rbind(trackyear, trackyear2)
-    
-    # Get start and end years
-    startyear <- dplyr::first(na.omit(data[data[, k] == dplyr::first(na.omit(data[c(1:46), k])), 1]))
-    finalyear <- dplyr::last(na.omit(data[data[, k] == dplyr::last(na.omit(data[c(1:46), k])), 1]))
-    
-    # Create and save the plot
-    png(here(paste0("figures/Raw_data_trends/Changepoint/", foldertype, "/EnvCPT/", dfnames[k - 1], ".png")),
-        width = 449, height = 374.5, units = "px", res = 90)
-    par(mar = c(4, 4.5, 2, 0.5))
-    plot(data[, 1], data[, k], main = paste0(dfnames[k - 1], yax), 
-         ylab = ylabel, xlab = "Year", type = "l", lwd = 3, col = "#00608A", 
-         cex.lab = 1.5, cex.axis = 1.2, xaxt = 'n')
-    
-    # Ensure cpyear is valid before plotting
-    if (!is.na(cpyear[1])) {
-      axis(side = 1, at = c(startyear, cpyear, finalyear), labels = c(startyear, cpyear, finalyear))
-      abline(v = cpyear, col = "red", lwd = 3, lty = 2)
-    }
-    
-    # Plot segmented mean lines safely
-    if (length(cp) == 0) {
-      abline(h = ints[1], col = "red", lwd = 1, lty = 1)
-    } else {
-      ablineclip(h = ints[1], col = "red", lwd = 1, lty = 1, x1 = startyear - 1, x2 = cpyear[1])
-      if (length(cp) >= 1) ablineclip(h = ints[2], col = "red", lwd = 1, lty = 1, x1 = cpyear[1], x2 = finalyear)
-      if (length(cp) >= 2) ablineclip(h = ints[3], col = "red", lwd = 1, lty = 1, x1 = cpyear[2], x2 = finalyear)
-      if (length(cp) >= 3) ablineclip(h = ints[4], col = "red", lwd = 1, lty = 1, x1 = cpyear[3], x2 = finalyear)
-    }
-    
-    # Add legend
-    legend("topright", inset = c(0.03, 0.03), 
-           legend = c(datatype, "Segmented Mean", "Changepoint"), 
-           col = c("#00608A", "red", "red"), 
-           lty = c(1, 1, 2), lwd = c(3, 1, 3), cex = 1.0)
-    
-    dev.off()
-  }
-  list2env(trackyear, envir = .GlobalEnv)
-}
 
-####Changepoint Function for Changepoint package####
-trackyear<-data.frame(matrix(ncol = 1, nrow = 0))
-colnames(trackyear) <- c('cpyear')
-changepoint_fun<- function(data,dfnames,foldertype,yax,ylabel,datatype){
-  for (k in 2:length(data)){
-    fit_cpt = changepoint::cpt.mean(na.omit(data[c(1:46),k]),method = "AMOC",penalty="AIC",minseglen = 5)  # Fit mean model
-    ints = param.est(fit_cpt)$mean #get mean cpt values
-    cp = cpts(fit_cpt) #get changepoint year numbers
-    cpyear<-na.omit(as.data.frame(data[c(1,k)]))[cp,1] #get changepoint year
-    trackyear2<-as.data.frame(cpyear)
-    trackyear<- rbind(trackyear,trackyear2)
-    
-    startyear<-dplyr::first(na.omit(data[data[,k]==(dplyr::first(na.omit(data[c(1:46),k]))),1])) #get first non NA year of data for every column
-    finalyear<-dplyr::last(na.omit(data[data[,k]==(dplyr::last(na.omit(data[c(1:46),k]))),1])) #get final year of data for every column
-    #make plot
-    png(here(paste0("Figures/Raw_data_trends/Changepoint/",foldertype,"/changepoint/",dfnames[k-1],".png")),width = 449, height = 374.5, units = "px",res=90)
-    par(mar=c(4,4.5,2,0.5))
-    plot(data[,1],data[,k],main=paste0(c(dfnames[k-1],yax),collapse=" "),ylab=ylabel, xlab="Year",type="l",lwd=3,col="#00608A",cex.lab=1.5,cex.axis=1.2,xaxt='n')
-    
-    abline(v=c(cpyear[1],cpyear[2],cpyear[3]),col="red",lwd=3,lty=2)
-    if (length(cp)==0){abline(h=ints[1],col="red",lwd=1,lty=1)}else{
-      if (length(cp)==1){ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=cpyear[1])
-        ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=cpyear[1],x2=finalyear)}else{
-          if (length(cp)==2){ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=cpyear[1])
-            ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=cpyear[1],x2=cpyear[2])
-            ablineclip(h=ints[3],col="red",lwd=1,lty=1,x1=cpyear[2],x2=finalyear)}else{
-              if (length(cp)>=3){ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=cpyear[1])
-                ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=cpyear[1],x2=cpyear[2])
-                ablineclip(h=ints[3],col="red",lwd=1,lty=1,x1=cpyear[2],x2=cpyear[3])
-                ablineclip(h=ints[4],col="red",lwd=1,lty=1,x1=cpyear[3],x2=finalyear)}
-              
-            }}}
-    
-    axis(side=1,at=c(startyear,cpyear,finalyear),labels=c(startyear,cpyear,finalyear))
-    #    abline(v=cpyear,col="red",lwd=3,lty=2)
-    #    ablineclip(h=ints[1],col="red",lwd=1,lty=1,x1=startyear-1,x2=if(length(cp)==0){finalyear}else{cpyear})
-    #    ablineclip(h=ints[2],col="red",lwd=1,lty=1,x1=if(length(cp)==0){startyear-1}else{cpyear},x2=finalyear)
-    legend("topright",inset=c(0.03,0.03), legend=c(datatype, "Segmented Mean","Changepoint"), col=c("#00608A", "red", "red"), lty=c(1,1,2),lwd=c(3,1,3), cex=1.0)
-    dev.off()
-  }
-  list2env(trackyear, envir = .GlobalEnv)
-}
-#####################change point analysis for r/ssb data for winter flounder#######################
-#### Call function for age1 data####
-changepoint_fun(age1df[-c(8:9)],age1names,foldertype="recruitment",yax="Abundance",ylabel="Recruitment",datatype="Recruitment Data")
-envcpt_fun(rssbdf, rssbnames, foldertype="recruitment", yax="", ylabel="Winter Flounder R/SSB", datatype="Recruitment Data")
+
+
+
+
+
+
+
+
+
 
 
 

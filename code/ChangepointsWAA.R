@@ -18,6 +18,7 @@ snema_age <- read.csv(here("data/snema_age.csv"))
 #waa_gom <- read.csv(here("data/WAA_gom.csv"))
 waa_gbk <- read.csv(here("data/WAA_gbk.csv"))
 waa_snema <- read.csv(here("data/WAA_snema.csv"))
+waa_gom <- waa_gom
 colnames(waa_snema)[colnames(waa_snema) == "Age7."] <- "Age7" #getting rid of random period in column
 
 #NAA data filtering by AGE
@@ -39,9 +40,36 @@ snema_age5 <- snema_age[which(snema_age$AGE=='5'),]
 gom_age6 <- gom_age[which(gom_age$AGE=='6'),]
 gbk_age6 <- gbk_age[which(gbk_age$AGE=='6'),]
 snema_age6 <- snema_age[which(snema_age$AGE=='6'),]
-gom_age7 <- gom_age[which(gom_age$AGE=='7'),]
-gbk_age7 <- gbk_age[which(gbk_age$AGE=='7'),]
-snema_age7 <- snema_age[which(snema_age$AGE=='7'),]
+gom_age7 <- gom_age[which(gom_age$AGE>='7'),] #this is age 7+
+gbk_age7 <- gbk_age[which(gbk_age$AGE>='7'),] #this is age 7+
+snema_age7 <- snema_age[which(snema_age$AGE>='7'),] #this is age 7+
+
+#WAA GOM data wrangling
+waa_gom <- read.csv(here("data/WAA_gom.csv"))
+waa_gom <- subset(waa_gom, select = c(SURVEY, YEAR, AGE, MEAN)) #select the columns we want to use)) 
+names(waa_gom)[names(waa_gom) == 'MEAN'] <- 'Weight'
+waa_gom <- waa_gom[which(waa_gom$AGE > 0),]
+
+waa_gom <- waa_gom %>%
+  group_by(YEAR, AGE) %>%
+  summarise(Weight = mean(Weight), .groups = "drop")
+
+waa_gom <- waa_gom %>%
+  mutate(Age_Group = ifelse(AGE >= 7, 7, AGE)) %>% #Create a new column to combine ages 7+
+  group_by(YEAR, Age_Group) %>% #Group by Year and Age_Group
+  dplyr::summarise(MEAN = mean(Weight, na.rm = TRUE), .groups = 'drop') %>% # Compute the average
+  pivot_wider(
+    names_from = Age_Group,
+    values_from = MEAN,
+    names_prefix = "Age"
+  ) %>%
+  mutate(MEAN = replace_na(rowMeans(across(starts_with("Age")), na.rm = TRUE), 0))
+colnames(waa_gom)[colnames(waa_gom) == "YEAR"] <- "Year"
+
+write.csv(waa_gom, here::here("data", "waa_gom.csv"), row.names = FALSE)
+
+
+
 
 #waa data filtering by AGE and filtering out rows with NA values.
 gbk_waa1 <- waa_gbk[!is.na(waa_gbk$Age1), c("Year", "Age1")]
@@ -57,7 +85,14 @@ snema_waa3 <- waa_snema[!is.na(waa_snema$Age3), c("Year", "Age3")]
 snema_waa4 <- waa_snema[!is.na(waa_snema$Age4), c("Year", "Age4")]
 snema_waa5 <- waa_snema[!is.na(waa_snema$Age5), c("Year", "Age5")]
 snema_waa6 <- waa_snema[!is.na(waa_snema$Age6), c("Year", "Age6")]
-snema_waa7 <- waa_snema[!is.na(waa_snema$Age7.), c("Year", "Age7.")]
+snema_waa7 <- waa_snema[!is.na(waa_snema$Age7.), c("Year", "Age7")]
+gom_waa1 <- waa_gom[!is.na(waa_gom$Age1), c("Year", "Age1")]
+gom_waa2 <- waa_gom[!is.na(waa_gom$Age2), c("Year", "Age2")]
+gom_waa3 <- waa_gom[!is.na(waa_gom$Age3), c("Year", "Age3")]
+gom_waa4 <- waa_gom[!is.na(waa_gom$Age4), c("Year", "Age4")]
+gom_waa5 <- waa_gom[!is.na(waa_gom$Age5), c("Year", "Age5")]
+gom_waa6 <- waa_gom[!is.na(waa_gom$Age6), c("Year", "Age6")]
+gom_waa7 <- waa_gom[!is.na(waa_gom$Age7), c("Year", "Age7")]
 
 #### ENVCPT FUNCTION ####
 trackyear<-data.frame(matrix(ncol = 1, nrow = 0))
@@ -104,16 +139,20 @@ envcpt_fun<- function(data,dfnames,foldertype,yax,ylabel,datatype){
 ####### call function ########
 #perform full joins by year using Reduce and merge
 waadf <- Reduce(function(x, y) merge(x, y, by = "Year", all = TRUE), 
-                 list(waa_gbk, waa_snema))
+                 list(waa_gbk, waa_snema, waa_gom))
 waadf <- waadf[-c(1), ] #get rid of first row because there are NAs for GBK
 
 #check result
 colnames(waadf)<-c('year',
                     'age1GBK','age2GBK', 'age3GBK', 'age4GBK', 'age5GBK', 'age6GBK', 'age7GBK',
-                   'age1SNEMA', 'age2SNEMA', 'age3SNEMA', 'age4SNEMA', 'age5SNEMA', 'age6SNEMA', 'age7SNEMA')
+                   'age1SNEMA', 'age2SNEMA', 'age3SNEMA', 'age4SNEMA', 'age5SNEMA', 'age6SNEMA', 'age7SNEMA',
+                   'age1GOM', 'age2GOM', 'age3GOM', 'age4GOM', 'age5GOM', 'age6GOM', 'age7GOM')
 head(waadf)
-waanames<-colnames(waadf[2:15])
+waanames<-colnames(waadf[2:21])
 #run function
 envcpt_fun(waadf,waanames,foldertype="waa",yax="Weight at Age",ylabel="Weight",datatype="WAA Data")
+WAA_Envyears <- as.data.frame(cpyear)
+
+
 
 

@@ -7,6 +7,7 @@ library(ggplot2)
 ################################################################################
 
 #SNEMA age data wrangling
+snema_age <- read.csv(here("data/snema_age.csv"))
 snema_NAA <- snema_age[which(snema_age$AGE > 3),] #make ages 4 plus
 snema_NAA <- snema_NAA[!snema_NAA$YEAR  < 1982,] #make years 1982 plus to match WAA data
 snema_NAA <- subset(snema_NAA, select = c(SURVEY, SEASON, YEAR, AGE, NO_AT_AGE)) #select the columns we want to use

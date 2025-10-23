@@ -77,7 +77,7 @@ condnames <- colnames(conddf[2:4])
 
 #run function
 envcpt_fun(conddf,condnames,foldertype="condition",yax="Relative Condition",ylabel="Relative Condition",datatype="EcoData Condition")
-
+COND_Envyears <- as.data.frame(cpyear)
 
 
 

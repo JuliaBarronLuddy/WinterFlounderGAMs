@@ -6,7 +6,7 @@ library(mgcv)
 ################################################################################
 #Georges Bank
 
-#Data load
+#Stock data load
 gbk_NMFS_age1 <- gbk_age1[which(gom_age1$SURVEY=='NMFS spring BTS'),]
 gbk_NMFS_age1 <- gbk_NMFS_age1 %>% select(c('YEAR', 'NO_AT_AGE'))
 names(gbk_NMFS_age1)[names(gbk_NMFS_age1) == 'YEAR'] <- 'Year'
